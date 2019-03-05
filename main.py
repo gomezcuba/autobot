@@ -76,7 +76,7 @@ def put_pref_ds(chat_id, person_id, name, pref, num_seats=5):
 		random.setstate(chat_entity['rngstate'])
 		rec['randorder'] = random.randint(0,2**31) # will use to sort
 		chat_entity['rngstate']=random.getstate()
-		dsclient.set(chat_entity)
+		dsclient.put(chat_entity)
 
 	rec['timestamp'] = int(round(time.time()*1000)) # millisecond precision
 	rec['preference'] = pref
