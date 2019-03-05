@@ -55,6 +55,9 @@ def get_or_create_chat_entity(chat_id):
 	chat_entity = dsclient.get(chat_key)
 	if not chat_entity:
 		chat_entity = datastore.Entity(key=chat_key)
+		chat_entity['todayseed']=int.from_bytes(os.urandom(4),byteorder='big')
+		random.seed(chat_entity['todayseed'])
+		chat_entity['rngstate']=random.getstate()
 		dsclient.put(chat_entity)
 	return chat_entity
 
@@ -65,13 +68,19 @@ def put_pref_ds(chat_id, person_id, name, pref, num_seats=5):
 	# The Cloud Datastore key for the new entity
 	rec_key = dsclient.key('Chat', chat_id, 'Person', person_id)
 
-	# Prepares the new entity
-	rec = datastore.Entity(key=rec_key)
-	rec['name'] = name
+	rec = datastore.get(rec_key)
+	if not rec:# Prepares the new entity
+		rec = datastore.Entity(key=rec_key)
+		rec['name'] = name
+		chat_entity = dsclient.get(chat_key)
+		random.setstate(chat_entity['rngstate'])
+		rec['randorder'] = random.randint(0,2**31) # will use to sort
+		chat_entity['rngstate']=random.getstate()
+		dsclient.set(chat_entity)
+
+	rec['timestamp'] = int(round(time.time()*1000)) # millisecond precision
 	rec['preference'] = pref
 	rec['seats'] = num_seats
-	rec['timestamp'] = int(round(time.time()*1000)) # millisecond precision
-	rec['randorder'] = random.randint(0,2**31) # will use to sort
 
 	# Saves the entity
 	dsclient.put(rec)
@@ -110,7 +119,6 @@ def put_pref_ds(chat_id, person_id, name, pref, num_seats=5):
 # Remove person from datastore
 def delete_person(chat_id, person_id):
 	rec_key = dsclient.key('Chat', chat_id, 'Person', person_id)
-	#TODO must modify this into a change of status to SALTO without true delete so that people who do SALTO maintain their old order number
 	dsclient.delete(rec_key)
 
 def get_name(user):
@@ -420,7 +428,8 @@ def salto(bot, update):
 	user_name = get_name(user)
 	chat_id = update.message.chat_id
 
-	delete_person(chat_id, user.id)
+	# delete_person(chat_id, user.id)
+	put_pref_ds(chat_id, user.id, user_name, "SALTO")
 	msg = (user_name + " fa l'asociale.")
 	bot.send_message(chat_id=chat_id, text=msg)
 
