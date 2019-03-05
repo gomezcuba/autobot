@@ -71,6 +71,7 @@ def put_pref_ds(chat_id, person_id, name, pref, num_seats=5):
 	rec['preference'] = pref
 	rec['seats'] = num_seats
 	rec['timestamp'] = int(round(time.time()*1000)) # millisecond precision
+	rec['randorder'] = random.randint(0,2**31) # will use to sort
 
 	# Saves the entity
 	dsclient.put(rec)
@@ -78,37 +79,38 @@ def put_pref_ds(chat_id, person_id, name, pref, num_seats=5):
 	# Delete the outdated status
 	remove_status(chat_id)
 
-# Get car list from datastore
-def get_car_list(chat_id):
-	ancestor = dsclient.key('Chat', chat_id)
-	query = dsclient.query(kind='Person', ancestor=ancestor)
-	query.add_filter('preference', '=', 'CAR')
-	return list(query.fetch())
+# # Get car list from datastore
+# def get_car_list(chat_id):
+# 	ancestor = dsclient.key('Chat', chat_id)
+# 	query = dsclient.query(kind='Person', ancestor=ancestor)
+# 	query.add_filter('preference', '=', 'CAR')
+# 	return list(query.fetch())
 
-# Get list of people requiring a lift from datastore
-def get_lifts_list(chat_id):
-	ancestor = dsclient.key('Chat', chat_id)
-	query = dsclient.query(kind='Person', ancestor=ancestor)
-	query.add_filter('preference', '=', 'LIFT')
-	return list(query.fetch())
-
-# Get list of people possibly requiring a lift
-def get_poss_lifts(chat_id):
-	ancestor = dsclient.key('Chat', chat_id)
-	query = dsclient.query(kind='Person', ancestor=ancestor)
-	query.add_filter('preference', '=', 'POSSIBLY_LIFT')
-	return list(query.fetch())
-
-# Get bike list from datastore
-def get_bike_list(chat_id):
-	ancestor = dsclient.key('Chat', chat_id)
-	query = dsclient.query(kind='Person', ancestor=ancestor)
-	query.add_filter('preference', '=', 'BIKE')
-	return list(query.fetch())
+# # Get list of people requiring a lift from datastore
+# def get_lifts_list(chat_id):
+# 	ancestor = dsclient.key('Chat', chat_id)
+# 	query = dsclient.query(kind='Person', ancestor=ancestor)
+# 	query.add_filter('preference', '=', 'LIFT')
+# 	return list(query.fetch())
+#
+# # Get list of people possibly requiring a lift
+# def get_poss_lifts(chat_id):
+# 	ancestor = dsclient.key('Chat', chat_id)
+# 	query = dsclient.query(kind='Person', ancestor=ancestor)
+# 	query.add_filter('preference', '=', 'POSSIBLY_LIFT')
+# 	return list(query.fetch())
+#
+# # Get bike list from datastore
+# def get_bike_list(chat_id):
+# 	ancestor = dsclient.key('Chat', chat_id)
+# 	query = dsclient.query(kind='Person', ancestor=ancestor)
+# 	query.add_filter('preference', '=', 'BIKE')
+# 	return list(query.fetch())
 
 # Remove person from datastore
 def delete_person(chat_id, person_id):
 	rec_key = dsclient.key('Chat', chat_id, 'Person', person_id)
+	#TODO must modify this into a change of status to SALTO without true delete so that people who do SALTO maintain their old order number
 	dsclient.delete(rec_key)
 
 def get_name(user):
@@ -161,7 +163,16 @@ def compute_status(chat_id):
 	if current_status:
 		return current_status
 
-	cars_list = get_car_list(chat_id)
+	ancestor = dsclient.key('Chat', chat_id)
+	query = dsclient.query(kind='Person', ancestor=ancestor)
+	all_requests= list(query.fetch())
+	all_requests=all_requests.sort(key=lambda item: item['randorder'])
+
+	cars_list=[x for x in all_requests if x['preference']=='CAR']
+	lifts_list=[x for x in all_requests if x['preference']=='LIFT']
+	poss_lifts_list=[x for x in all_requests if x['preference']=='POSSIBLY_LIFT']
+	lifts_list=[x for x in all_requests if x['preference']=='BIKE']
+	# cars_list = get_car_list(chat_id)
 	num_cars = len(cars_list)
 
 	cars_list_divided = [[] for i in range(0, 10)]
@@ -169,19 +180,19 @@ def compute_status(chat_id):
 		cars_list_divided[car['seats'] - 1].append(car)
 	num_cars_divided = [len(c) for c in cars_list_divided]
 
-	lifts_list = get_lifts_list(chat_id)
+	# lifts_list = get_lifts_list(chat_id)
 	num_lifts = len(lifts_list)
 
-	poss_lifts_list = get_poss_lifts(chat_id)
+	# poss_lifts_list = get_poss_lifts(chat_id)
 	num_poss_lifts = len(poss_lifts_list)
 	num_bikes = len(get_bike_list(chat_id))
-	rawseed = str.join(';',
-		['C:'] + sorted(get_names_list(cars_list)) +
-		['L:'] + sorted(get_names_list(lifts_list)) +
-		['P:'] + sorted(get_names_list(poss_lifts_list)))
-	seed = 5381
-	for c in rawseed:
-		seed = ((seed * 33) & 4294967295) ^ ord(c)
+	# rawseed = str.join(';',
+	# 	['C:'] + sorted(get_names_list(cars_list)) +
+	# 	['L:'] + sorted(get_names_list(lifts_list)) +
+	# 	['P:'] + sorted(get_names_list(poss_lifts_list)))
+	# seed = 5381
+	# for c in rawseed:
+	# 	seed = ((seed * 33) & 4294967295) ^ ord(c)
 
 	available_seats = sum(
 		[(i + 1) * n for i, n in enumerate(num_cars_divided)])
@@ -205,10 +216,14 @@ def compute_status(chat_id):
 		if num_seats_left >= num_poss_lifts:
 			people_poss_lifts = poss_lifts_list
 		else:
-			randstate = random.getstate()
-			random.seed(seed)
-			people_poss_lifts = random.sample(poss_lifts_list, num_seats_left)
-			random.setstate(randstate)
+			# randstate = random.getstate()
+			# random.seed(seed)
+			# people_poss_lifts = random.sample(poss_lifts_list, num_seats_left)
+			# random.setstate(randstate)
+
+			#this list is now pre-sorted randomly in a way that has full persistence with add/delete/change commands
+			#therefore, now it is fair to simply take the first
+			people_poss_lifts = poss_lifts_list[0:num_seats_left]
 
 		msg = ""
 		passengers = []
